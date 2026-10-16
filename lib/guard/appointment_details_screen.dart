@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../action/action.dart';
 
 class AppointmentDetailsScreen extends StatefulWidget {
@@ -269,15 +271,47 @@ class _AppointmentDetailsScreenState extends State<AppointmentDetailsScreen> {
     return 'N/A';
   }
 
+  /// Guard-facing display names for sub-venues.
+  ///
+  /// DISPLAY ONLY — the raw backend value is never modified and is never sent
+  /// back to the API, so the rename is local to this screen. Other roles and
+  /// the web portal continue to see the original names. "Badri Darshan" is
+  /// deliberately absent: it is shown unchanged.
+  static const Map<String, String> _subvenueDisplayAliases = {
+    'gurudev meeting room': 'Vyasa',
+    'lounge darshan': 'Atri',
+  };
+
+  /// Collapses every encoding of a sub-venue to a single lookup key, e.g.
+  /// 'Gurudev Meeting Room', 'gurudev_meeting_room' and
+  /// 'morning-gurudev_meeting_room' all become 'gurudev meeting room'.
+  String _normalizeSubvenueKey(String raw) {
+    var key = raw.trim().toLowerCase();
+    key = key.replaceAll(RegExp(r'[_\-]+'), ' '); // unify separators
+    key = key.replaceAll(RegExp(r'\s+'), ' ').trim(); // collapse whitespace
+    key = key.replaceFirst(
+      RegExp(r'^(morning|afternoon|evening|night)\s+'),
+      '',
+    ); // strip the session prefix used by the web app
+    return key.trim();
+  }
+
+  /// Returns the guard-facing label for a sub-venue, or the original value when
+  /// there is no alias for it.
+  String _displaySubvenue(String raw) {
+    if (raw.trim().isEmpty) return '';
+    return _subvenueDisplayAliases[_normalizeSubvenueKey(raw)] ?? raw.trim();
+  }
+
   String _getSubvenue() {
     if (detailedAppointmentData == null) return '';
     try {
       final topLevel = detailedAppointmentData!['subvenue']?.toString();
-      if (topLevel != null && topLevel.isNotEmpty) return topLevel;
+      if (topLevel != null && topLevel.isNotEmpty) return _displaySubvenue(topLevel);
       final scheduledData = detailedAppointmentData!['scheduledDateTime'];
       if (scheduledData is Map<String, dynamic>) {
         final subvenue = scheduledData['subvenue']?.toString();
-        return subvenue ?? '';
+        return _displaySubvenue(subvenue ?? '');
       }
     } catch (_) {}
     return '';
@@ -304,6 +338,18 @@ class _AppointmentDetailsScreenState extends State<AppointmentDetailsScreen> {
       final scheduled = detailedAppointmentData!['scheduledDateTime'];
       if (scheduled is Map<String, dynamic>) {
         return scheduled['isPrivate'] == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  // Secretary enabled "Allow with car" when scheduling ("Allow car" badge)
+  bool _isCarAllowed() {
+    try {
+      if (detailedAppointmentData == null) return false;
+      final scheduled = detailedAppointmentData!['scheduledDateTime'];
+      if (scheduled is Map<String, dynamic>) {
+        return scheduled['allowWithCar'] == true;
       }
     } catch (_) {}
     return false;
@@ -388,6 +434,113 @@ class _AppointmentDetailsScreenState extends State<AppointmentDetailsScreen> {
     return apptType == 'quick' && 
            quickApt is Map<String, dynamic> && 
            quickApt['isQuickAppointment'] == true;
+  }
+
+  bool _isGuestAppointment() {
+    if (detailedAppointmentData == null) return false;
+    final appointmentType = detailedAppointmentData!['appointmentType']?.toString();
+    final guestInformation = detailedAppointmentData!['guestInformation'];
+    return appointmentType?.toLowerCase() == 'guest' ||
+        (guestInformation is Map<String, dynamic> &&
+            guestInformation['fullName']?.toString().isNotEmpty == true);
+  }
+
+  /// Designation of the main appointee, resolved with the same precedence the
+  /// secretary view uses (see appointment_detail_page.dart `_getAppointmentRole`):
+  /// guest -> quick appointment -> the user's current designation.
+  ///
+  /// These fields live on `detailedAppointmentData` (GET /appointment/{id});
+  /// the check-in payload backing `appointmentData` does not carry them.
+  String _getMainAppointeeDesignation() {
+    if (detailedAppointmentData == null) return '';
+    try {
+      final data = detailedAppointmentData!;
+
+      if (_isGuestAppointment()) {
+        final guestInformation = data['guestInformation'];
+        if (guestInformation is Map<String, dynamic>) {
+          final designation = guestInformation['designation']?.toString();
+          if (designation != null && designation.trim().isNotEmpty) {
+            return designation.trim();
+          }
+        }
+      }
+
+      final quickApt = data['quick_apt'];
+      if (data['appt_type']?.toString() == 'quick' && quickApt is Map<String, dynamic>) {
+        final required = quickApt['required'];
+        if (required is Map<String, dynamic>) {
+          final designation = required['designation']?.toString();
+          if (designation != null && designation.trim().isNotEmpty) {
+            return designation.trim();
+          }
+        }
+      }
+
+      final current = data['userCurrentDesignation']?.toString();
+      if (current != null && current.trim().isNotEmpty) return current.trim();
+    } catch (e) {
+      print('DEBUG: Error resolving main appointee designation: $e');
+    }
+    return '';
+  }
+
+  /// Company / organization of the main appointee. Same precedence as
+  /// [_getMainAppointeeDesignation].
+  ///
+  /// Note: quick appointments (created via "Add Appointment") currently have no
+  /// company field on the document at all, so this returns '' for them and the
+  /// row is hidden. The `quick_apt.required` lookup below is forward-compatible
+  /// and will start working with no further mobile changes once the backend
+  /// persists a company for quick appointments.
+  String _getMainAppointeeCompany() {
+    if (detailedAppointmentData == null) return '';
+    try {
+      final data = detailedAppointmentData!;
+
+      if (_isGuestAppointment()) {
+        final guestInformation = data['guestInformation'];
+        if (guestInformation is Map<String, dynamic>) {
+          final company = guestInformation['company']?.toString();
+          if (company != null && company.trim().isNotEmpty) {
+            return company.trim();
+          }
+        }
+      }
+
+      final quickApt = data['quick_apt'];
+      if (data['appt_type']?.toString() == 'quick' && quickApt is Map<String, dynamic>) {
+        final required = quickApt['required'];
+        if (required is Map<String, dynamic>) {
+          final company = (required['company'] ??
+                  required['organization'] ??
+                  required['companyName'])
+              ?.toString();
+          if (company != null && company.trim().isNotEmpty) {
+            return company.trim();
+          }
+        }
+      }
+
+      final current = data['userCurrentCompany']?.toString();
+      if (current != null && current.trim().isNotEmpty) return current.trim();
+    } catch (e) {
+      print('DEBUG: Error resolving main appointee company: $e');
+    }
+    return '';
+  }
+
+  /// Name + designation + company as one copyable block, one per line.
+  /// Blank fields are skipped so no empty lines end up on the clipboard.
+  String _buildMainAppointeeCopyText(String fullName) {
+    final designation = _getMainAppointeeDesignation();
+    final company = _getMainAppointeeCompany();
+    final lines = <String>[
+      if (fullName.trim().isNotEmpty && fullName.trim() != 'Unknown') fullName.trim(),
+      if (designation.isNotEmpty) designation,
+      if (company.isNotEmpty) company,
+    ];
+    return lines.join('\n');
   }
 
   int _getTotalNumberOfUsers() {
@@ -1103,6 +1256,131 @@ class _AppointmentDetailsScreenState extends State<AppointmentDetailsScreen> {
     );
   }
 
+  /// Copies [text] to the clipboard, following the same snackbar contract used
+  /// in lib/components/inbox/appointment_detail_page.dart (green floating on
+  /// success, red on failure). The payload here is multi-line, so we show a
+  /// short label instead of echoing the copied text back.
+  Future<void> _copyToClipboard(String text, {String label = 'Details'}) async {
+    if (text.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Nothing to copy'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$label copied to clipboard'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to copy: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Shared pill used for the MAIN APPOINTEE / SECRETARY ADDED / VIP / No Photo
+  /// tags on a user card.
+  Widget _buildTagPill({
+    required String label,
+    required Color background,
+    required Color border,
+    required Color textColor,
+    IconData? icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border, width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 12, color: textColor),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: textColor,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// A "Designation: Chief Secretary" style row. Callers must skip empty values.
+  Widget _buildAppointeeInfoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Icon(icon, size: 14, color: Colors.grey.shade600),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '$label: ',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+                TextSpan(
+                  text: value,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF333333),
+                  ),
+                ),
+              ],
+            ),
+            style: const TextStyle(fontSize: 13, height: 1.3),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
   void _showPartialAdmissionDialog() {
     if (isAnyOperationLoading) return; // Don't show dialog if any operation is in progress
     
@@ -1168,14 +1446,20 @@ class _AppointmentDetailsScreenState extends State<AppointmentDetailsScreen> {
   }
 
   Widget _buildUserCard(Map<String, dynamic> user, int index) {
-    final fullName = user['fullName'] ?? 'Unknown';
+    final String fullName = (user['fullName'] ?? 'Unknown').toString();
     final userType = user['userType'] ?? 'unknown';
     final status = user['status'] ?? 'unknown';
-    final profilePhotoUrl = user['profilePhotoUrl'];
+    final String? profilePhotoUrl = user['profilePhotoUrl']?.toString();
     final totalUsers = _getTotalNumberOfUsers();
     final isAccompanyingUserWithoutPhoto = userType != 'main' && profilePhotoUrl == null && totalUsers > 10;
     final isNewUser = user['adminStatus'] == true || user['adminStatus'] == 'true';
     final isVip = user['type']?.toString().toLowerCase() == 'vip';
+
+    // Designation / company are only available for the main appointee — the
+    // accompanying-person records carry no such fields anywhere in the API.
+    final isMainAppointee = index == 0;
+    final mainDesignation = isMainAppointee ? _getMainAppointeeDesignation() : '';
+    final mainCompany = isMainAppointee ? _getMainAppointeeCompany() : '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -1198,95 +1482,108 @@ class _AppointmentDetailsScreenState extends State<AppointmentDetailsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // First line: Index and Name with photo availability indicator
+          // First line: Index, name, tags and — for the main appointee —
+          // designation, company and a copy-to-clipboard button.
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  '${index + 1}. $fullName${index == 0 ? ' (Main Appointee)' : ''}',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF333333),
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (isNewUser) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: Colors.blue.shade200,
-                      width: 1,
-                    ),
-                  ),
-                  child: Text(
-                    'SECRETARY ADDED',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.blue.shade700,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              if (isVip) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.purple.shade50,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: Colors.purple.shade200,
-                      width: 1,
-                    ),
-                  ),
-                  child: Text(
-                    'VIP',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.purple.shade700,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-              if (isAccompanyingUserWithoutPhoto) ...[
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.orange.withOpacity(0.3),
-                      width: 1,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        size: 14,
-                        color: Colors.orange[700],
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${index + 1}. $fullName',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF333333),
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'No Photo',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.orange[700],
-                          fontWeight: FontWeight.w500,
-                        ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+
+                    // Tags — a Wrap so any combination reflows onto a new
+                    // line instead of overflowing on narrow screens.
+                    if (isMainAppointee ||
+                        isNewUser ||
+                        isVip ||
+                        isAccompanyingUserWithoutPhoto) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          if (isMainAppointee)
+                            _buildTagPill(
+                              label: 'MAIN APPOINTEE',
+                              background: const Color(0xFFFFF7ED),
+                              border: const Color(0xFFFDBA74),
+                              textColor: const Color(0xFFC2410C),
+                              icon: Icons.star_rounded,
+                            ),
+                          if (isNewUser)
+                            _buildTagPill(
+                              label: 'SECRETARY ADDED',
+                              background: Colors.blue.shade50,
+                              border: Colors.blue.shade200,
+                              textColor: Colors.blue.shade700,
+                            ),
+                          if (isVip)
+                            _buildTagPill(
+                              label: 'VIP',
+                              background: Colors.purple.shade50,
+                              border: Colors.purple.shade200,
+                              textColor: Colors.purple.shade700,
+                            ),
+                          if (isAccompanyingUserWithoutPhoto)
+                            _buildTagPill(
+                              label: 'No Photo',
+                              background: Colors.orange.withOpacity(0.1),
+                              border: Colors.orange.withOpacity(0.3),
+                              textColor: Colors.orange.shade700,
+                              icon: Icons.info_outline,
+                            ),
+                        ],
                       ),
                     ],
+
+                    // Designation / Company — main appointee only. Empty
+                    // values are hidden entirely rather than shown as 'N/A'.
+                    if (mainDesignation.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      _buildAppointeeInfoRow(
+                        icon: Icons.badge_outlined,
+                        label: 'Designation',
+                        value: mainDesignation,
+                      ),
+                    ],
+                    if (mainCompany.isNotEmpty) ...[
+                      SizedBox(height: mainDesignation.isNotEmpty ? 6 : 8),
+                      _buildAppointeeInfoRow(
+                        icon: Icons.apartment_outlined,
+                        label: 'Company / Organization',
+                        value: mainCompany,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              // Copy name + designation + company as one block
+              if (isMainAppointee) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Copy name, designation & company',
+                  onPressed: () => _copyToClipboard(
+                    _buildMainAppointeeCopyText(fullName),
+                    label: 'Appointee details',
                   ),
+                  icon: const Icon(Icons.copy_rounded, size: 20),
+                  color: const Color(0xFFF97316),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                  splashRadius: 20,
                 ),
               ],
             ],
@@ -1312,112 +1609,89 @@ class _AppointmentDetailsScreenState extends State<AppointmentDetailsScreen> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
                 child: profilePhotoUrl != null
-                    ? Stack(
-                        children: [
-                          // Main image container
-                          Container(
+                    // Tapping anywhere on the photo opens the full-screen
+                    // viewer. (The old corner zoom button has been removed.)
+                    ? GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _showImageModal(profilePhotoUrl, fullName),
+                        child: Container(
+                          width: double.infinity,
+                          height: double.infinity,
+                          color: Colors.grey[900],
+                          child: Image.network(
+                            profilePhotoUrl,
+                            fit: BoxFit.cover, // Cover the entire square area
                             width: double.infinity,
                             height: double.infinity,
-                            color: Colors.grey[900],
-                            child: Image.network(
-                              profilePhotoUrl,
-                              fit: BoxFit.cover, // Cover the entire square area
-                              width: double.infinity,
-                              height: double.infinity,
-                              loadingBuilder: (context, child, loadingProgress) {
-                                if (loadingProgress == null) return child;
-                                return Container(
-                                  color: Colors.grey[900],
-                                  child: Center(
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        SizedBox(
-                                          width: 40,
-                                          height: 40,
-                                          child: CircularProgressIndicator(
-                                            value: loadingProgress.expectedTotalBytes != null
-                                                ? loadingProgress.cumulativeBytesLoaded / 
-                                                  loadingProgress.expectedTotalBytes!
-                                                : null,
-                                            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                                            strokeWidth: 3,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Text(
-                                          'Loading...',
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            color: Colors.white.withOpacity(0.8),
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  color: Colors.grey[900],
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Container(
+                                color: Colors.grey[900],
+                                child: Center(
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(
-                                        Icons.person,
-                                        size: 80,
-                                        color: Colors.white.withOpacity(0.6),
+                                      SizedBox(
+                                        width: 40,
+                                        height: 40,
+                                        child: CircularProgressIndicator(
+                                          value: loadingProgress.expectedTotalBytes != null
+                                              ? loadingProgress.cumulativeBytesLoaded /
+                                                loadingProgress.expectedTotalBytes!
+                                              : null,
+                                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                                          strokeWidth: 3,
+                                        ),
                                       ),
                                       const SizedBox(height: 12),
                                       Text(
-                                        'Image unavailable',
+                                        'Loading...',
                                         style: TextStyle(
-                                          fontSize: 16,
+                                          fontSize: 14,
                                           color: Colors.white.withOpacity(0.8),
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'Tap to retry',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.white.withOpacity(0.5),
-                                          fontWeight: FontWeight.w400,
+                                          fontWeight: FontWeight.w500,
                                         ),
                                       ),
                                     ],
                                   ),
-                                );
-                              },
-                            ),
-                          ),
-                          // Instagram-style zoom button
-                          Positioned(
-                            top: 12,
-                            right: 12,
-                            child: GestureDetector(
-                              onTap: () => _showImageModal(profilePhotoUrl, fullName),
-                              child: Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.7),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: Colors.white.withOpacity(0.3),
-                                    width: 1,
-                                  ),
                                 ),
-                                child: const Icon(
-                                  Icons.zoom_in,
-                                  color: Colors.white,
-                                  size: 18,
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                color: Colors.grey[900],
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.person,
+                                      size: 80,
+                                      color: Colors.white.withOpacity(0.6),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      'Image unavailable',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.white.withOpacity(0.8),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Tap to view',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white.withOpacity(0.5),
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ),
+                              );
+                            },
                           ),
-                        ],
+                        ),
                       )
                     : Container(
                         color: Colors.grey[900],
@@ -1802,6 +2076,35 @@ class _AppointmentDetailsScreenState extends State<AppointmentDetailsScreen> {
                                               ],
                                             ),
                                           ),
+                                          // "Allow car" badge — secretary allowed this
+                                          // appointment to come with a car
+                                          if (_isCarAllowed())
+                                            // Side-view white car with "Allow car" on its body
+                                            SizedBox(
+                                              width: 120,
+                                              height: 64,
+                                              child: Stack(
+                                                alignment: Alignment.center,
+                                                children: [
+                                                  const FaIcon(
+                                                    FontAwesomeIcons.carSide,
+                                                    color: Colors.white,
+                                                    size: 64,
+                                                  ),
+                                                  Positioned(
+                                                    bottom: 18,
+                                                    child: Text(
+                                                      'Allow car',
+                                                      style: TextStyle(
+                                                        color: Colors.amber.shade700,
+                                                        fontSize: 14,
+                                                        fontWeight: FontWeight.w800,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
                                         ],
                                       ),
                                       if (_getTotalNumberOfUsers() > 10) ...[

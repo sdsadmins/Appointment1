@@ -15,7 +15,7 @@ class ActionService {
   static String? _baseUrl;
 
   static const String _fallbackBaseUrl =
-      'https://f039-203-192-241-145.ngrok-free.app/api/v3';
+      'https://appt-test.sumerudigital.com/api/v3';
 
   /// App version for middleware. Set from main() via PackageInfo.fromPlatform(); no default.
   static String appVersion = '';
@@ -23,12 +23,14 @@ class ActionService {
       Platform.isAndroid ? 'android' : (Platform.isIOS ? 'ios' : 'unknown');
 
   static Map<String, String> _versionHeaders() => {
-        'x-app-version': appVersion,
-        'x-platform': _platform,
-      };
+    'x-app-version': appVersion,
+    'x-platform': _platform,
+  };
 
-  static Future<http.Response> getUrl(Uri url,
-      {Map<String, String>? headers}) async {
+  static Future<http.Response> getUrl(
+    Uri url, {
+    Map<String, String>? headers,
+  }) async {
     final allHeaders = {...?headers, ..._versionHeaders()};
     return await http.get(url, headers: allHeaders);
   }
@@ -65,7 +67,7 @@ class ActionService {
   // 2) Then run version check (with version headers); if 426, set pending so main shows update card.
   static Future<void> initializeBaseUrl() async {
     const baseUrlEndpoint =
-        'https://f039-203-192-241-145.ngrok-free.app/api/v3/baseurl';
+        'https://appt-test.sumerudigital.com/api/v3/baseurl';
 
     // —— Step 1: Fetch base URL (no version headers) ——
     try {
@@ -88,7 +90,9 @@ class ActionService {
         }
       } else {
         _baseUrl = _fallbackBaseUrl;
-        print('⚠️ [DEBUG] Base URL API returned ${response.statusCode}, using fallback');
+        print(
+          '⚠️ [DEBUG] Base URL API returned ${response.statusCode}, using fallback',
+        );
       }
     } catch (error) {
       print('❌ [ERROR] Failed to fetch base URL: $error');
@@ -98,20 +102,24 @@ class ActionService {
 
     // —— Step 2: Version check (with version headers); if 426, show update card later ——
     try {
-      print('🌐 [DEBUG] Step 2: Version check (with x-app-version, x-platform)');
+      print(
+        '🌐 [DEBUG] Step 2: Version check (with x-app-version, x-platform)',
+      );
       final versionResponse = await getUrl(
         Uri.parse(baseUrlEndpoint),
         headers: {'Content-Type': 'application/json'},
       );
-      print('🌐 [DEBUG] Version check Status Code: ${versionResponse.statusCode}');
+      print(
+        '🌐 [DEBUG] Version check Status Code: ${versionResponse.statusCode}',
+      );
 
       if (versionResponse.statusCode == 426) {
         try {
           final data =
               jsonDecode(versionResponse.body) as Map<String, dynamic>?;
           _pendingForceUpdateStoreUrl = data?['store_url']?.toString() ?? '';
-          _pendingForceUpdateLatestVersion =
-              data?['latest_version']?.toString();
+          _pendingForceUpdateLatestVersion = data?['latest_version']
+              ?.toString();
         } catch (_) {}
         _forceUpdateRequired = true;
         print('📲 [DEBUG] Update required (426); update card will be shown.');
@@ -137,11 +145,11 @@ class ActionService {
   static Future<String> get _oldBaseUrl async {
     try {
       print(
-        '🌐 [DEBUG] Fetching base URL from: https://f039-203-192-241-145.ngrok-free.app/api/v3/baseurl',
+        '🌐 [DEBUG] Fetching base URL from: https://appt-test.sumerudigital.com/api/v3/baseurl',
       );
 
       final response = await http.get(
-        Uri.parse('https://f039-203-192-241-145.ngrok-free.app/api/v3/baseurl'),
+        Uri.parse('https://appt-test.sumerudigital.com/api/v3/baseurl'),
         headers: {'Content-Type': 'application/json'},
       );
 
@@ -153,7 +161,7 @@ class ActionService {
           '❌ [ERROR] Base URL API failed with status: ${response.statusCode}',
         );
         // Fallback to hardcoded URL if API fails
-        return 'https://f039-203-192-241-145.ngrok-free.app/api/v3';
+        return 'https://appt-test.sumerudigital.com/api/v3';
       }
 
       final data = jsonDecode(response.body);
@@ -166,7 +174,7 @@ class ActionService {
     } catch (error) {
       print('❌ [ERROR] Failed to fetch base URL: $error');
       // Fallback to hardcoded URL if there's an error
-      return 'https://f039-203-192-241-145.ngrok-free.app/api/v3'; 
+      return 'https://appt-test.sumerudigital.com/api/v3';
     }
   }
 
@@ -469,76 +477,78 @@ class ActionService {
     }
   }
 
-
   // Delete account
   static Future<Map<String, dynamic>> deleteUserAccount() async {
-  try {
-    final userData = await StorageService.getUserData();
+    try {
+      final userData = await StorageService.getUserData();
 
-    // Extract MongoDB _id safely
-    final mongoId = userData?['userId'] 
-        ?? userData?['data']?['userId']
-        ?? userData?['user']?['userId'];
+      // Extract MongoDB _id safely
+      final mongoId =
+          userData?['userId'] ??
+          userData?['data']?['userId'] ??
+          userData?['user']?['userId'];
 
-    if (mongoId == null) {
+      if (mongoId == null) {
+        return {
+          'success': false,
+          'statusCode': 400,
+          'message': 'User ID missing — cannot delete account.',
+        };
+      }
+
+      final token = await StorageService.getToken();
+      if (token == null) {
+        return {
+          'success': false,
+          'statusCode': 401,
+          'message': 'No authentication token found. Please login again.',
+        };
+      }
+
+      final url = Uri.parse(
+        '$baseUrl/auth/delete',
+      ).replace(queryParameters: {'userId': mongoId});
+
+      print("🗑️ [DEBUG] Deleting user → $mongoId");
+
+      final response = await http.delete(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      print("🗑️ Status: ${response.statusCode}");
+      print("🗑️ Body: ${response.body}");
+
+      final Map<String, dynamic> json = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        await StorageService.logout();
+        return {
+          'success': true,
+          'statusCode': 200,
+          'message':
+              json['message'] ?? 'User account soft-deleted successfully.',
+        };
+      }
+
       return {
         'success': false,
-        'statusCode': 400,
-        'message': 'User ID missing — cannot delete account.',
+        'statusCode': response.statusCode,
+        'message': json['message'] ?? 'Failed to delete user account.',
       };
-    }
+    } catch (err) {
+      print("❌ ERROR deleteUserAccount: $err");
 
-    final token = await StorageService.getToken();
-    if (token == null) {
       return {
         'success': false,
-        'statusCode': 401,
-        'message': 'No authentication token found. Please login again.',
+        'statusCode': 500,
+        'message': 'Network error: $err',
       };
     }
-
-    final url = Uri.parse('$baseUrl/auth/delete')
-        .replace(queryParameters: {'userId': mongoId});
-
-    print("🗑️ [DEBUG] Deleting user → $mongoId");
-
-    final response = await http.delete(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-    );
-
-    print("🗑️ Status: ${response.statusCode}");
-    print("🗑️ Body: ${response.body}");
-
-    final Map<String, dynamic> json = jsonDecode(response.body);
-
-    if (response.statusCode == 200) {
-      await StorageService.logout();
-      return {
-        'success': true,
-        'statusCode': 200,
-        'message': json['message'] ?? 'User account soft-deleted successfully.',
-      };
-    }
-
-    return {
-      'success': false,
-      'statusCode': response.statusCode,
-      'message': json['message'] ?? 'Failed to delete user account.',
-    };
-  } catch (err) {
-    print("❌ ERROR deleteUserAccount: $err");
-
-    return {
-      'success': false,
-      'statusCode': 500,
-      'message': 'Network error: $err',
-    };
   }
-}
 
   // Get sub-user face match results by sub-user ID
   static Future<Map<String, dynamic>> getSubUserFaceMatchResultBySubUserId(
@@ -1461,190 +1471,192 @@ class ActionService {
   }
 
   // Schedule appointment with all options
- static Future<Map<String, dynamic>> scheduleAppointment({
-  required String appointmentId,
-  required String scheduledDate,
-  required String scheduledTime,
-  Map<String, dynamic>? options,
-  String? meetingType,
-  String? venueId,
-  String? venueLabel,
-  String? arrivalTime,
-  Map<String, dynamic>? scheduleConfirmation,
-  String? userId,
-  bool? isExternal, // ✅ NEW
-}) async {
-  try {
-    // 🔐 Get token
-    final token = await StorageService.getToken();
-    if (token == null) {
-      return {
-        'success': false,
-        'statusCode': 401,
-        'message': 'No authentication token found. Please login again.',
-      };
-    }
-
-    // 🧪 Validate appointmentId
-    if (appointmentId.isEmpty) {
-      return {
-        'success': false,
-        'statusCode': 400,
-        'message': 'Invalid appointmentId',
-      };
-    }
-
-    // 🧪 Validate required fields
-    if (scheduledDate.isEmpty || scheduledTime.isEmpty) {
-      return {
-        'success': false,
-        'statusCode': 400,
-        'message': 'Scheduled date and time are required',
-      };
-    }
-
-    // 🕒 Validate date & time format
+  static Future<Map<String, dynamic>> scheduleAppointment({
+    required String appointmentId,
+    required String scheduledDate,
+    required String scheduledTime,
+    Map<String, dynamic>? options,
+    String? meetingType,
+    String? venueId,
+    String? venueLabel,
+    String? arrivalTime,
+    Map<String, dynamic>? scheduleConfirmation,
+    String? userId,
+    bool? isExternal, // ✅ NEW
+  }) async {
     try {
-      final scheduledDateTime =
-          DateTime.parse('$scheduledDate $scheduledTime');
-      if (scheduledDateTime.isBefore(DateTime.now())) {
+      // 🔐 Get token
+      final token = await StorageService.getToken();
+      if (token == null) {
+        return {
+          'success': false,
+          'statusCode': 401,
+          'message': 'No authentication token found. Please login again.',
+        };
+      }
+
+      // 🧪 Validate appointmentId
+      if (appointmentId.isEmpty) {
         return {
           'success': false,
           'statusCode': 400,
-          'message': 'Scheduled time must be in the future',
+          'message': 'Invalid appointmentId',
         };
       }
-    } catch (_) {
-      return {
-        'success': false,
-        'statusCode': 400,
-        'message': 'Invalid date or time format',
-      };
-    }
 
-    // 📦 Prepare request body
-    final Map<String, dynamic> requestBody = {
-      'scheduledDate': scheduledDate,
-      'scheduledTime': scheduledTime,
-      'options': options ??
-          {
-            'tbsRequired': false,
-            'dontSendNotifications': false,
-            'sendArrivalTime': false,
-            'scheduleEmailSmsConfirmation': false,
-            'sendVdsEmail': false,
-            'stayAvailable': false,
-          },
-    };
-
-    // ➕ Optional fields
-    if (meetingType != null) {
-      requestBody['meetingType'] = meetingType;
-    }
-
-    if (venueId != null) {
-      requestBody['venue'] = venueId;
-      if (venueLabel != null) {
-        requestBody['venueLabel'] = venueLabel;
+      // 🧪 Validate required fields
+      if (scheduledDate.isEmpty || scheduledTime.isEmpty) {
+        return {
+          'success': false,
+          'statusCode': 400,
+          'message': 'Scheduled date and time are required',
+        };
       }
-    }
 
-    if (arrivalTime != null) {
-      requestBody['arrivalTime'] = arrivalTime;
-    }
-
-    if (scheduleConfirmation != null) {
-      if (scheduleConfirmation['date'] != null) {
-        requestBody['sc_date'] = scheduleConfirmation['date'];
+      // 🕒 Validate date & time format
+      try {
+        final scheduledDateTime = DateTime.parse(
+          '$scheduledDate $scheduledTime',
+        );
+        if (scheduledDateTime.isBefore(DateTime.now())) {
+          return {
+            'success': false,
+            'statusCode': 400,
+            'message': 'Scheduled time must be in the future',
+          };
+        }
+      } catch (_) {
+        return {
+          'success': false,
+          'statusCode': 400,
+          'message': 'Invalid date or time format',
+        };
       }
-      if (scheduleConfirmation['time'] != null) {
-        requestBody['sc_time'] = scheduleConfirmation['time'];
+
+      // 📦 Prepare request body
+      final Map<String, dynamic> requestBody = {
+        'scheduledDate': scheduledDate,
+        'scheduledTime': scheduledTime,
+        'options':
+            options ??
+            {
+              'tbsRequired': false,
+              'dontSendNotifications': false,
+              'sendArrivalTime': false,
+              'scheduleEmailSmsConfirmation': false,
+              'sendVdsEmail': false,
+              'stayAvailable': false,
+            },
+      };
+
+      // ➕ Optional fields
+      if (meetingType != null) {
+        requestBody['meetingType'] = meetingType;
       }
-    }
 
-    // 🚀 isExternal support
-    if (isExternal != null) {
-      requestBody['isExternal'] = isExternal;
-    }
+      if (venueId != null) {
+        requestBody['venue'] = venueId;
+        if (venueLabel != null) {
+          requestBody['venueLabel'] = venueLabel;
+        }
+      }
 
-    // 🌐 API Call
-    final url = '$baseUrl/appointment/$appointmentId/schedule';
+      if (arrivalTime != null) {
+        requestBody['arrivalTime'] = arrivalTime;
+      }
 
-    print('🌐 PUT $url');
-    print('📦 Body: ${jsonEncode(requestBody)}');
+      if (scheduleConfirmation != null) {
+        if (scheduleConfirmation['date'] != null) {
+          requestBody['sc_date'] = scheduleConfirmation['date'];
+        }
+        if (scheduleConfirmation['time'] != null) {
+          requestBody['sc_time'] = scheduleConfirmation['time'];
+        }
+      }
 
-    final response = await http.put(
-      Uri.parse(url),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode(requestBody),
-    );
+      // 🚀 isExternal support
+      if (isExternal != null) {
+        requestBody['isExternal'] = isExternal;
+      }
 
-    print('📡 Status: ${response.statusCode}');
-    print('📄 Response: ${response.body}');
+      // 🌐 API Call
+      final url = '$baseUrl/appointment/$appointmentId/schedule';
 
-    // 🧠 Parse response
-    late final Map<String, dynamic> responseData;
-    try {
-      responseData = jsonDecode(response.body);
-    } catch (_) {
-      return {
-        'success': false,
-        'statusCode': 500,
-        'message': 'Invalid server response',
-      };
-    }
+      print('🌐 PUT $url');
+      print('📦 Body: ${jsonEncode(requestBody)}');
 
-    // ✅ Success
-    if (response.statusCode == 200) {
-      return {
-        'success': true,
-        'statusCode': 200,
-        'message':
-            responseData['message'] ?? 'Appointment scheduled successfully',
-        'data': responseData['data'],
-      };
-    }
+      final response = await http.put(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(requestBody),
+      );
 
-    // ⚠️ Known errors
-    if (response.statusCode == 400 ||
-        response.statusCode == 404 ||
-        response.statusCode == 500) {
+      print('📡 Status: ${response.statusCode}');
+      print('📄 Response: ${response.body}');
+
+      // 🧠 Parse response
+      late final Map<String, dynamic> responseData;
+      try {
+        responseData = jsonDecode(response.body);
+      } catch (_) {
+        return {
+          'success': false,
+          'statusCode': 500,
+          'message': 'Invalid server response',
+        };
+      }
+
+      // ✅ Success
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'statusCode': 200,
+          'message':
+              responseData['message'] ?? 'Appointment scheduled successfully',
+          'data': responseData['data'],
+        };
+      }
+
+      // ⚠️ Known errors
+      if (response.statusCode == 400 ||
+          response.statusCode == 404 ||
+          response.statusCode == 500) {
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          'message': responseData['message'] ?? 'Request failed',
+          'error': responseData['error'],
+        };
+      }
+
+      // 🔒 Unauthorized
+      if (response.statusCode == 401) {
+        await StorageService.logout();
+        return {
+          'success': false,
+          'statusCode': 401,
+          'message': 'Session expired. Please login again.',
+        };
+      }
+
+      // ❌ Fallback
       return {
         'success': false,
         'statusCode': response.statusCode,
-        'message': responseData['message'] ?? 'Request failed',
-        'error': responseData['error'],
+        'message': 'Failed to schedule appointment',
       };
-    }
-
-    // 🔒 Unauthorized
-    if (response.statusCode == 401) {
-      await StorageService.logout();
+    } catch (e) {
+      print('❌ Network error: $e');
       return {
         'success': false,
-        'statusCode': 401,
-        'message': 'Session expired. Please login again.',
+        'statusCode': 500,
+        'message': 'Network error. Please try again.',
       };
     }
-
-    // ❌ Fallback
-    return {
-      'success': false,
-      'statusCode': response.statusCode,
-      'message': 'Failed to schedule appointment',
-    };
-  } catch (e) {
-    print('❌ Network error: $e');
-    return {
-      'success': false,
-      'statusCode': 500,
-      'message': 'Network error. Please try again.',
-    };
   }
-}
 
   // Get appointments by scheduled date (including quick appointments)
   static Future<Map<String, dynamic>> getAppointmentsByScheduledDate({
@@ -3805,7 +3817,9 @@ class ActionService {
     String? rescheduleVenueName,
     String? message,
   }) async {
-    print('🚀 sendBulkEmail function called with templateId: $templateId, recipients: ${recipients.length}');
+    print(
+      '🚀 sendBulkEmail function called with templateId: $templateId, recipients: ${recipients.length}',
+    );
     final Uri url = Uri.parse('$baseUrl/email-templates/bulk');
     print('🌐 Full API URL: $url');
 
@@ -3849,7 +3863,8 @@ class ActionService {
       if (rescheduleDate != null) 'rescheduleDate': rescheduleDate,
       if (rescheduleTime != null) 'rescheduleTime': rescheduleTime,
       if (rescheduleVenue != null) 'rescheduleVenue': rescheduleVenue,
-      if (rescheduleVenueName != null) 'rescheduleVenueName': rescheduleVenueName,
+      if (rescheduleVenueName != null)
+        'rescheduleVenueName': rescheduleVenueName,
       if (message != null) 'message': message,
     };
 
@@ -3958,7 +3973,7 @@ class ActionService {
       request.fields['designation'] = designation;
       request.fields['preferredDate'] = preferredDate;
       request.fields['preferredTime'] = preferredTime;
-      
+
       // Add venue only if provided (optional)
       if (venue != null && venue.trim().isNotEmpty) {
         request.fields['venue'] = venue.trim();
@@ -4175,17 +4190,22 @@ class ActionService {
     try {
       final userData = await StorageService.getUserData();
       if (userData == null) return false;
-      
+
       // Check primary role
       final role = userData['role']?.toString().toLowerCase();
       if (role == 'vds') return true;
-      
+
       // Check additional roles
-      final additionalRoles = userData['additionalRoles'] ?? userData['userTags'] ?? userData['selectedRoles'];
+      final additionalRoles =
+          userData['additionalRoles'] ??
+          userData['userTags'] ??
+          userData['selectedRoles'];
       if (additionalRoles is List) {
-        return additionalRoles.any((role) => role.toString().toLowerCase() == 'vds');
+        return additionalRoles.any(
+          (role) => role.toString().toLowerCase() == 'vds',
+        );
       }
-      
+
       return false;
     } catch (e) {
       print('❌ Error checking VDS role: $e');
@@ -4225,37 +4245,49 @@ class ActionService {
     }
 
     final header = buffer.sublist(0, 4);
-    
+
     // PNG: 89 50 4E 47
-    if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47) {
+    if (header[0] == 0x89 &&
+        header[1] == 0x50 &&
+        header[2] == 0x4E &&
+        header[3] == 0x47) {
       print('🔍 Detected: PNG file');
       return 'image/png';
     }
-    
+
     // JPEG: FF D8 FF
     if (header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF) {
       print('🔍 Detected: JPEG file');
       return 'image/jpeg';
     }
-    
+
     // GIF: 47 49 46 38
-    if (header[0] == 0x47 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x38) {
+    if (header[0] == 0x47 &&
+        header[1] == 0x49 &&
+        header[2] == 0x46 &&
+        header[3] == 0x38) {
       print('🔍 Detected: GIF file');
       return 'image/gif';
     }
-    
+
     // WebP: 52 49 46 46 (RIFF header, but we need to check further for WebP)
-    if (header[0] == 0x52 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x46) {
+    if (header[0] == 0x52 &&
+        header[1] == 0x49 &&
+        header[2] == 0x46 &&
+        header[3] == 0x46) {
       // Check for WebP signature at offset 8-11: "WEBP"
       if (buffer.length >= 12) {
         final webpHeader = buffer.sublist(8, 12);
-        if (webpHeader[0] == 0x57 && webpHeader[1] == 0x45 && webpHeader[2] == 0x42 && webpHeader[3] == 0x50) {
+        if (webpHeader[0] == 0x57 &&
+            webpHeader[1] == 0x45 &&
+            webpHeader[2] == 0x42 &&
+            webpHeader[3] == 0x50) {
           print('🔍 Detected: WebP file');
           return 'image/webp';
         }
       }
     }
-    
+
     print('🔍 Unknown file type');
     return 'application/octet-stream';
   }
@@ -4581,7 +4613,9 @@ class ActionService {
       print('DEBUG API: Has attachment file: ${attachmentFile != null}');
       if (attachmentFile != null) {
         print('DEBUG API: Attachment file path: ${attachmentFile.path}');
-        print('DEBUG API: Attachment file exists: ${await attachmentFile.exists()}');
+        print(
+          'DEBUG API: Attachment file exists: ${await attachmentFile.exists()}',
+        );
       }
 
       final uri = Uri.parse('$baseUrl/appointment/$appointmentId/enhanced');
@@ -4776,11 +4810,15 @@ class ActionService {
       print('DEBUG API: Attachment file path: ${attachmentFile?.path}');
       print('DEBUG API: Attachment file size: ${attachmentFile?.size}');
 
-      final uri = Uri.parse('$baseUrl/appointment/$appointmentId/enhanced/admin');
+      final uri = Uri.parse(
+        '$baseUrl/appointment/$appointmentId/enhanced/admin',
+      );
 
       // If there's an attachment file, use multipart request
       if (attachmentFile != null && attachmentFile.path != null) {
-        print('DEBUG API: Using multipart request with attachment for admin update');
+        print(
+          'DEBUG API: Using multipart request with attachment for admin update',
+        );
 
         // Create multipart request
         final request = http.MultipartRequest('PUT', uri);
@@ -4838,7 +4876,9 @@ class ActionService {
         }
       } else {
         // No attachment file, use JSON request
-        print('DEBUG API: Using JSON request without attachment for admin update');
+        print(
+          'DEBUG API: Using JSON request without attachment for admin update',
+        );
 
         final response = await http.put(
           uri,
@@ -4849,7 +4889,9 @@ class ActionService {
           body: jsonEncode(cleanUpdateData),
         );
 
-        print('DEBUG API: Admin JSON response status code: ${response.statusCode}');
+        print(
+          'DEBUG API: Admin JSON response status code: ${response.statusCode}',
+        );
         print('DEBUG API: Admin JSON response body: ${response.body}');
 
         if (response.statusCode == 200) {
@@ -5201,32 +5243,35 @@ class ActionService {
 
       // Parse response
       final responseBody = response.body;
-      
+
       if (response.statusCode == 200) {
         try {
           final Map<String, dynamic> responseData = jsonDecode(responseBody);
-          
+
           // Transform backend response to match UI expectations
           // Backend returns: { results: { appointments: {data, total}, events: {data, total} }, pagination: {page, limit} }
           // UI expects: { data: [...], pagination: {currentPage, totalPages, totalCount, hasNextPage} }
-          
-          if (responseData['success'] == true && responseData['results'] != null) {
+
+          if (responseData['success'] == true &&
+              responseData['results'] != null) {
             final results = responseData['results'] as Map<String, dynamic>;
-            final appointments = results['appointments'] as Map<String, dynamic>? ?? {};
+            final appointments =
+                results['appointments'] as Map<String, dynamic>? ?? {};
             final events = results['events'] as Map<String, dynamic>? ?? {};
-            
+
             // Combine appointments and events
             final List<dynamic> combinedData = [];
-            
+
             // Add appointments with type marker
-            final appointmentsList = appointments['data'] as List<dynamic>? ?? [];
+            final appointmentsList =
+                appointments['data'] as List<dynamic>? ?? [];
             for (var apt in appointmentsList) {
               combinedData.add({
                 ...apt as Map<String, dynamic>,
                 '_resultType': 'appointment',
               });
             }
-            
+
             // Add events with type marker
             final eventsList = events['data'] as List<dynamic>? ?? [];
             for (var event in eventsList) {
@@ -5235,9 +5280,10 @@ class ActionService {
                 '_resultType': 'event',
               });
             }
-            
+
             // Calculate pagination info
-            final pagination = responseData['pagination'] as Map<String, dynamic>? ?? {};
+            final pagination =
+                responseData['pagination'] as Map<String, dynamic>? ?? {};
             final currentPage = pagination['page'] as int? ?? page;
             final limitValue = pagination['limit'] as int? ?? limit;
             final totalAppointments = appointments['total'] as int? ?? 0;
@@ -5245,7 +5291,7 @@ class ActionService {
             final totalCount = totalAppointments + totalEvents;
             final totalPages = (totalCount / limitValue).ceil();
             final hasNextPage = currentPage < totalPages;
-            
+
             return {
               'success': true,
               'query': responseData['query'] ?? query,
@@ -5262,10 +5308,7 @@ class ActionService {
                   'total': totalAppointments,
                   'data': appointmentsList,
                 },
-                'events': {
-                  'total': totalEvents,
-                  'data': eventsList,
-                },
+                'events': {'total': totalEvents, 'data': eventsList},
               },
             };
           } else {
@@ -5285,13 +5328,16 @@ class ActionService {
         try {
           final Map<String, dynamic> errorData = jsonDecode(responseBody);
           throw Exception(
-            errorData['message'] ?? 'Invalid search request. Please check your search query.',
+            errorData['message'] ??
+                'Invalid search request. Please check your search query.',
           );
         } catch (e) {
           if (e is Exception) {
             rethrow;
           }
-          throw Exception('Invalid search request. Please check your search query.');
+          throw Exception(
+            'Invalid search request. Please check your search query.',
+          );
         }
       } else if (response.statusCode == 401) {
         // Token expired or invalid
@@ -5305,7 +5351,8 @@ class ActionService {
         try {
           final Map<String, dynamic> errorData = jsonDecode(responseBody);
           throw Exception(
-            errorData['message'] ?? 'Server error occurred. Please try again later.',
+            errorData['message'] ??
+                'Server error occurred. Please try again later.',
           );
         } catch (e) {
           if (e is Exception) {
@@ -5318,13 +5365,16 @@ class ActionService {
         try {
           final Map<String, dynamic> errorData = jsonDecode(responseBody);
           throw Exception(
-            errorData['message'] ?? 'Failed to perform global search. Status: ${response.statusCode}',
+            errorData['message'] ??
+                'Failed to perform global search. Status: ${response.statusCode}',
           );
         } catch (e) {
           if (e is Exception) {
             rethrow;
           }
-          throw Exception('Failed to perform global search. Status: ${response.statusCode}');
+          throw Exception(
+            'Failed to perform global search. Status: ${response.statusCode}',
+          );
         }
       }
     } catch (error) {
@@ -5452,7 +5502,8 @@ class ActionService {
         'mobilenumber': mobilenumber,
         'programTypesCanTeach': programTypesCanTeach,
         'isInternational': isInternational,
-        'teacherEmploymentType': teacherEmploymentType, // 'full_time' or 'part_time'
+        'teacherEmploymentType':
+            teacherEmploymentType, // 'full_time' or 'part_time'
       };
       // :white_check_mark: 6. Create multipart request for file upload
       final request = http.MultipartRequest(
@@ -6071,7 +6122,7 @@ class ActionService {
   }
 
   // Update user profile with S3 URL only (no file upload)
- // Update user profile with file upload support
+  // Update user profile with file upload support
   static Future<Map<String, dynamic>> updateUserProfile({
     required String fullName,
     required String email,
@@ -6139,7 +6190,9 @@ class ActionService {
       });
       // Handle userTags as array - send as both userTags and additionalRoles
       // Always send userTags field, even when empty, to clear existing roles if needed
-      print(':outbox_tray: userTags received: $userTags (length: ${userTags.length})');
+      print(
+        ':outbox_tray: userTags received: $userTags (length: ${userTags.length})',
+      );
       print(':outbox_tray: userTags is empty: ${userTags.isEmpty}');
       if (userTags.isNotEmpty) {
         // Send userTags using indexed keys to ensure all values are sent
@@ -6156,16 +6209,22 @@ class ActionService {
         // Send 'none' to indicate no roles selected (clear existing roles)
         request.fields['userTags'] = 'No Roles selected';
         request.fields['additionalRoles'] = 'No Roles selected';
-        print(':outbox_tray: Sending "none" for userTags to indicate no roles selected');
+        print(
+          ':outbox_tray: Sending "none" for userTags to indicate no roles selected',
+        );
         print(
           ':outbox_tray: Also sending "none" for additionalRoles to indicate no roles selected',
         );
-        print(':outbox_tray: This should tell the backend to remove all existing roles');
+        print(
+          ':outbox_tray: This should tell the backend to remove all existing roles',
+        );
       }
       // Handle profile photo - either file upload or S3 URL
       if (profilePhotoFile != null) {
         // Upload file directly to backend for validation and S3 upload
-        print(':outbox_tray: Uploading profile photo file: ${profilePhotoFile.path}');
+        print(
+          ':outbox_tray: Uploading profile photo file: ${profilePhotoFile.path}',
+        );
         // Get file extension and mime type
         final fileName = profilePhotoFile.path.split('/').last;
         final fileExtension = fileName.split('.').last.toLowerCase();
@@ -6181,7 +6240,9 @@ class ActionService {
           contentType: MediaType.parse(mimeType),
         );
         request.files.add(multipartFile);
-        print(':outbox_tray: Added file to request: $fileName (${fileLength} bytes, $mimeType)');
+        print(
+          ':outbox_tray: Added file to request: $fileName (${fileLength} bytes, $mimeType)',
+        );
       } else if (profilePhotoUrl != null && profilePhotoUrl.isNotEmpty) {
         // Use existing S3 URL
         request.fields['profilePhoto'] = profilePhotoUrl;
@@ -6190,7 +6251,9 @@ class ActionService {
         print(':outbox_tray: No profile photo provided');
       }
       // Send request
-      print(':outbox_tray: Sending profile update request with fields: ${request.fields}');
+      print(
+        ':outbox_tray: Sending profile update request with fields: ${request.fields}',
+      );
       print(
         ':outbox_tray: Sending profile update request with files: ${request.files.length}',
       );
@@ -6214,7 +6277,9 @@ class ActionService {
         print(':inbox_tray: responseData[\'data\']: ${responseData['data']}');
         // Update cached user data with the response data
         if (responseData['data'] != null) {
-          print(':inbox_tray: Saving user data to storage: ${responseData['data']}');
+          print(
+            ':inbox_tray: Saving user data to storage: ${responseData['data']}',
+          );
           await StorageService.saveUserData(responseData['data']);
           print(':white_check_mark: User data saved successfully to storage');
         } else {
@@ -6248,43 +6313,42 @@ class ActionService {
     }
   }
 
-
-
-
-
-
-
-
   ////////////////////////////////////////////////////---------------user---------------------////////////////////////////
   // Create appointment method using enhanced API with file attachment support
   // Validate accompany users with unique phone code logic
-  static List<String> _validateAccompanyUsers(Map<String, dynamic> accompanyUsers) {
+  static List<String> _validateAccompanyUsers(
+    Map<String, dynamic> accompanyUsers,
+  ) {
     final errors = <String>[];
-    
-    if (accompanyUsers == null || accompanyUsers['users'] == null || !(accompanyUsers['users'] is List)) {
+
+    if (accompanyUsers == null ||
+        accompanyUsers['users'] == null ||
+        !(accompanyUsers['users'] is List)) {
       return ['Invalid accompanyUsers structure'];
     }
 
     final users = accompanyUsers['users'] as List;
-    
+
     for (int i = 0; i < users.length; i++) {
       final user = users[i] as Map<String, dynamic>;
       final userIndex = i + 1;
-      
+
       // Validate required fields
-      if (user['fullName'] == null || user['fullName'].toString().trim().isEmpty) {
+      if (user['fullName'] == null ||
+          user['fullName'].toString().trim().isEmpty) {
         errors.add('User $userIndex: Full name is required');
       }
-      
+
       final age = int.tryParse(user['age']?.toString() ?? '0') ?? 0;
       if (age < 1 || age > 120) {
         errors.add('User $userIndex: Age must be between 1 and 120');
       }
-      
+
       // Check if user has unique phone code (sent as alternativePhone)
-      final hasUniquePhoneCode = user['alternativePhone'] != null && 
+      final hasUniquePhoneCode =
+          user['alternativePhone'] != null &&
           user['alternativePhone'].toString().trim().isNotEmpty;
-      
+
       // Phone/unique code validation based on age rules
       // - Age < 12 or > 59: neither phone nor unique code required
       // - Age 12..59: phone is required unless unique code provided
@@ -6293,7 +6357,8 @@ class ActionService {
         if (user['phoneNumber'] != null) {
           if (user['phoneNumber'] is Map) {
             final phoneObj = user['phoneNumber'] as Map<String, dynamic>;
-            hasPhoneNumber = phoneObj['number'] != null &&
+            hasPhoneNumber =
+                phoneObj['number'] != null &&
                 phoneObj['number'].toString().trim().isNotEmpty;
           } else if (user['phoneNumber'] is String) {
             hasPhoneNumber = user['phoneNumber'].toString().trim().isNotEmpty;
@@ -6301,23 +6366,27 @@ class ActionService {
         }
 
         if (!hasUniquePhoneCode && !hasPhoneNumber) {
-          errors.add('User $userIndex: Phone number is required for age $age unless a unique code is provided');
+          errors.add(
+            'User $userIndex: Phone number is required for age $age unless a unique code is provided',
+          );
         }
       } else {
         // Age < 12 or > 59: optional, no requirement
       }
-      
+
       // Validate unique phone code format if provided
       if (hasUniquePhoneCode) {
         final uniquePhoneCode = user['alternativePhone'].toString().trim();
         // Basic format validation - allow alphanumeric characters, 3-20 characters
         final uniquePhoneCodeRegex = RegExp(r'^[A-Za-z0-9]{3,20}$');
         if (!uniquePhoneCodeRegex.hasMatch(uniquePhoneCode)) {
-          errors.add('User $userIndex: Invalid unique phone code format (3-20 alphanumeric characters)');
+          errors.add(
+            'User $userIndex: Invalid unique phone code format (3-20 alphanumeric characters)',
+          );
         }
       }
     }
-    
+
     return errors;
   }
 
@@ -6355,7 +6424,8 @@ class ActionService {
             appointmentData['referenceInformation'] is Map) {
           final refInfo = appointmentData['referenceInformation'] as Map;
           if (refInfo.containsKey('referenceAsAccompanyUser')) {
-            appointmentData['referenceAsAccompanyUser'] = refInfo['referenceAsAccompanyUser'];
+            appointmentData['referenceAsAccompanyUser'] =
+                refInfo['referenceAsAccompanyUser'];
           }
         }
 
@@ -6398,7 +6468,9 @@ class ActionService {
 
       // Validate accompany users if present
       if (appointmentData['accompanyUsers'] != null) {
-        final validationErrors = _validateAccompanyUsers(appointmentData['accompanyUsers']);
+        final validationErrors = _validateAccompanyUsers(
+          appointmentData['accompanyUsers'],
+        );
         if (validationErrors.isNotEmpty) {
           print('❌ Accompany users validation failed: $validationErrors');
           return {
@@ -6412,7 +6484,9 @@ class ActionService {
       // Check duplicate mobile numbers among accompany users and main/guest user
       try {
         final accompanyUsers = appointmentData['accompanyUsers'];
-        if (accompanyUsers != null && accompanyUsers is Map && accompanyUsers['users'] is List) {
+        if (accompanyUsers != null &&
+            accompanyUsers is Map &&
+            accompanyUsers['users'] is List) {
           final users = (accompanyUsers['users'] as List).cast<dynamic>();
           final seen = <String>{};
           final duplicateNumbers = <String>[];
@@ -6450,7 +6524,8 @@ class ActionService {
             _seedPhone(appointmentData['phoneNumber']);
           }
           for (final key in ['mobileNumber', 'mobile', 'phone']) {
-            if (appointmentData.containsKey(key) && appointmentData[key] != null) {
+            if (appointmentData.containsKey(key) &&
+                appointmentData[key] != null) {
               _seedPhone(appointmentData[key]);
             }
           }
@@ -6458,10 +6533,14 @@ class ActionService {
           // 3) If guest appointment, include guest phone
           try {
             final apptFor = appointmentData['appointmentFor'];
-            final apptType = apptFor is Map ? (apptFor['type']?.toString()) : appointmentData['appointmentType']?.toString();
-            if (apptType == 'guest' && appointmentData['guestInformation'] is Map) {
+            final apptType = apptFor is Map
+                ? (apptFor['type']?.toString())
+                : appointmentData['appointmentType']?.toString();
+            if (apptType == 'guest' &&
+                appointmentData['guestInformation'] is Map) {
               final guestInfo = appointmentData['guestInformation'] as Map;
-              if (guestInfo['phoneNumber'] != null) _seedPhone(guestInfo['phoneNumber']);
+              if (guestInfo['phoneNumber'] != null)
+                _seedPhone(guestInfo['phoneNumber']);
               for (final key in ['mobileNumber', 'mobile', 'phone']) {
                 if (guestInfo.containsKey(key) && guestInfo[key] != null) {
                   _seedPhone(guestInfo[key]);
@@ -6484,7 +6563,8 @@ class ActionService {
           }
 
           if (duplicateNumbers.isNotEmpty) {
-            final msg = 'It seems you have entered the same mobile number more than once: ${duplicateNumbers.join(', ')}';
+            final msg =
+                'It seems you have entered the same mobile number more than once: ${duplicateNumbers.join(', ')}';
             print('❌ Duplicate phone numbers found: $msg');
             return {
               'success': false,
@@ -6492,7 +6572,9 @@ class ActionService {
               'error': msg,
             };
           }
-          print('✅ Duplicate phone validation passed. Checked numbers: ${seen.toList()}');
+          print(
+            '✅ Duplicate phone validation passed. Checked numbers: ${seen.toList()}',
+          );
         }
       } catch (e) {
         // Non-blocking: If normalization fails, do not stop request
@@ -6539,10 +6621,7 @@ class ActionService {
 
       // Ensure accompanyUsers is always present to avoid backend undefined access
       if (appointmentData['accompanyUsers'] == null) {
-        appointmentData['accompanyUsers'] = {
-          'numberOfUsers': 0,
-          'users': [],
-        };
+        appointmentData['accompanyUsers'] = {'numberOfUsers': 0, 'users': []};
       }
       // Ensure numberOfUsers defaults to 1 (main user only)
       if (appointmentData['numberOfUsers'] == null) {
@@ -6769,14 +6848,16 @@ class ActionService {
             };
           }
 
-          print('📸 Adding event image file to request: ${eventImageFile.path}');
+          print(
+            '📸 Adding event image file to request: ${eventImageFile.path}',
+          );
           final fileStream = http.ByteStream(eventImageFile.openRead());
           final fileLength = await eventImageFile.length();
-          
+
           // Get file extension and determine content type
           final fileName = eventImageFile.path.split('/').last;
-          final fileExtension = fileName.contains('.') 
-              ? fileName.split('.').last.toLowerCase() 
+          final fileExtension = fileName.contains('.')
+              ? fileName.split('.').last.toLowerCase()
               : 'jpg';
           final contentType = MediaType(
             'image',
@@ -6851,7 +6932,9 @@ class ActionService {
           'success': false,
           'statusCode': response.statusCode,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'Failed to create event. Please try again.',
+          'message':
+              responseData['message'] ??
+              'Failed to create event. Please try again.',
           'error': responseData['error'],
         };
       }
@@ -6923,11 +7006,11 @@ class ActionService {
         try {
           final fileStream = http.ByteStream(eventImageFile.openRead());
           final fileLength = await eventImageFile.length();
-          
+
           // Get file extension and determine content type
           final fileName = eventImageFile.path.split('/').last;
-          final fileExtension = fileName.contains('.') 
-              ? fileName.split('.').last.toLowerCase() 
+          final fileExtension = fileName.contains('.')
+              ? fileName.split('.').last.toLowerCase()
               : 'jpg';
           final contentType = MediaType(
             'image',
@@ -7032,18 +7115,25 @@ class ActionService {
 
       final requestBody = <String, dynamic>{
         'status': status,
-        'eventStatus': status, // Also include eventStatus in case API expects this field
+        'eventStatus':
+            status, // Also include eventStatus in case API expects this field
       };
 
       // Add optional fields
-      if (scheduledDate != null && scheduledDate.isNotEmpty && scheduledDate != 'null') {
+      if (scheduledDate != null &&
+          scheduledDate.isNotEmpty &&
+          scheduledDate != 'null') {
         requestBody['scheduledDate'] = scheduledDate;
       }
-      if (eventLocation != null && eventLocation.isNotEmpty && eventLocation != 'null') {
+      if (eventLocation != null &&
+          eventLocation.isNotEmpty &&
+          eventLocation != 'null') {
         requestBody['eventLocation'] = eventLocation;
       }
 
-      print('📅 Reschedule event request URL: $baseUrl/events/$eventId/reschedule');
+      print(
+        '📅 Reschedule event request URL: $baseUrl/events/$eventId/reschedule',
+      );
       print('📅 Reschedule event request body: ${jsonEncode(requestBody)}');
       print('📅 status: "$status"');
       print('📅 scheduledDate: "$scheduledDate"');
@@ -7091,13 +7181,15 @@ class ActionService {
           'success': true,
           'statusCode': 200,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'Event rescheduled successfully',
+          'message':
+              responseData['message'] ?? 'Event rescheduled successfully',
         };
       } else if (response.statusCode == 400) {
         return {
           'success': false,
           'statusCode': 400,
-          'message': responseData['message'] ?? 'Invalid request. Status is required.',
+          'message':
+              responseData['message'] ?? 'Invalid request. Status is required.',
           'error': responseData['error'],
         };
       } else if (response.statusCode == 401) {
@@ -7187,7 +7279,9 @@ class ActionService {
       }
 
       // Build URI with query parameters
-      final uri = Uri.parse('$baseUrl/events').replace(queryParameters: queryParams);
+      final uri = Uri.parse(
+        '$baseUrl/events',
+      ).replace(queryParameters: queryParams);
 
       print('🌐 Getting events: $uri');
 
@@ -7245,9 +7339,7 @@ class ActionService {
     }
   }
 
-  static Future<Map<String, dynamic>> getEventById(
-    String eventId,
-  ) async {
+  static Future<Map<String, dynamic>> getEventById(String eventId) async {
     try {
       final token = await StorageService.getToken();
 
@@ -7295,8 +7387,7 @@ class ActionService {
           'statusCode': 200,
           'data': responseData['data'],
           'message':
-              responseData['message'] ??
-              'Event details retrieved successfully',
+              responseData['message'] ?? 'Event details retrieved successfully',
         };
       } else if (response.statusCode == 400) {
         // Bad request
@@ -7334,8 +7425,7 @@ class ActionService {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message':
-              responseData['message'] ?? 'Failed to fetch event details',
+          'message': responseData['message'] ?? 'Failed to fetch event details',
         };
       }
     } catch (error) {
@@ -7475,7 +7565,9 @@ class ActionService {
     String submitType = 'subuser',
   }) async {
     try {
-      print('🔍 Starting duplicate photo validation for ${photoFiles.length} file(s) with submit_type: $submitType');
+      print(
+        '🔍 Starting duplicate photo validation for ${photoFiles.length} file(s) with submit_type: $submitType',
+      );
 
       final token = await StorageService.getToken();
       if (token == null) {
@@ -7494,15 +7586,17 @@ class ActionService {
             // Check file type from buffer to detect WebP files
             final fileBytes = await f.readAsBytes();
             final actualMimeType = _detectFileTypeFromBuffer(fileBytes);
-            
+
             if (actualMimeType == 'image/webp') {
               return {
                 'success': false,
-                'message': 'WebP files are not supported. Please upload a PNG or JPEG file instead.',
-                'error': 'The uploaded file appears to be in WebP format, which is not supported by the face detection API.',
+                'message':
+                    'WebP files are not supported. Please upload a PNG or JPEG file instead.',
+                'error':
+                    'The uploaded file appears to be in WebP format, which is not supported by the face detection API.',
               };
             }
-            
+
             validFiles.add(f);
             print('✅ Valid file: ${f.path} (detected type: $actualMimeType)');
           } else {
@@ -7513,8 +7607,8 @@ class ActionService {
         }
       }
 
-      if (validFiles.isEmpty && 
-          (imageUrls == null || imageUrls.isEmpty) && 
+      if (validFiles.isEmpty &&
+          (imageUrls == null || imageUrls.isEmpty) &&
           (imagesArray == null || imagesArray.isEmpty)) {
         return {'success': false, 'message': 'No files or URLs to validate'};
       }
@@ -7532,7 +7626,7 @@ class ActionService {
         final fileName = f.path.split('/').last;
         final fileBytes = await f.readAsBytes();
         final actualMimeType = _detectFileTypeFromBuffer(fileBytes);
-        
+
         formData.files.add(
           MapEntry(
             'files',
@@ -7586,29 +7680,42 @@ class ActionService {
           }
         }
         // Send the count for backend processing
-        formData.fields.add(MapEntry('reference_photos_count', index.toString()));
+        formData.fields.add(
+          MapEntry('reference_photos_count', index.toString()),
+        );
       }
 
-      final url = '$baseUrl/auth/validate-duplicate-photo?submit_type=$submitType';
+      final url =
+          '$baseUrl/auth/validate-duplicate-photo?submit_type=$submitType';
 
       print('📤 Sending duplicate photo validation request to: $url');
       print('📤 Submit type: $submitType');
-      print('📤 Files count: ${formData.files.where((e) => e.key == 'files').length}');
-      print('📤 URL fields count: ${formData.fields.where((e) => e.key == 'image_urls').length}');
-      print('📤 Reference photo fields count: ${formData.fields.where((e) => e.key.startsWith('reference_photo_url_')).length}');
-      
+      print(
+        '📤 Files count: ${formData.files.where((e) => e.key == 'files').length}',
+      );
+      print(
+        '📤 URL fields count: ${formData.fields.where((e) => e.key == 'image_urls').length}',
+      );
+      print(
+        '📤 Reference photo fields count: ${formData.fields.where((e) => e.key.startsWith('reference_photo_url_')).length}',
+      );
+
       // Debug: Print reference photo URLs
-      final referencePhotoFields = formData.fields.where((e) => e.key.startsWith('reference_photo_url_')).toList();
+      final referencePhotoFields = formData.fields
+          .where((e) => e.key.startsWith('reference_photo_url_'))
+          .toList();
       for (final field in referencePhotoFields) {
         print('📤 Reference photo: ${field.key} = ${field.value}');
       }
 
       final response = await dio.post(url, data: formData);
 
-      print('📥 Duplicate photo validation response status: ${response.statusCode}');
+      print(
+        '📥 Duplicate photo validation response status: ${response.statusCode}',
+      );
       print('📥 Duplicate photo validation response body: ${response.data}');
-      
-        // Debug: Print the structure of the response data
+
+      // Debug: Print the structure of the response data
       if (response.data is Map) {
         final responseData = response.data as Map;
         print('📥 Response data keys: ${responseData.keys.toList()}');
@@ -7623,7 +7730,9 @@ class ActionService {
               final apiResult = data['apiResult'] as Map;
               print('📥 apiResult keys: ${apiResult.keys.toList()}');
               if (apiResult.containsKey('duplicates_found')) {
-                print('📥 apiResult.duplicates_found value: ${apiResult['duplicates_found']}');
+                print(
+                  '📥 apiResult.duplicates_found value: ${apiResult['duplicates_found']}',
+                );
               }
             }
           }
@@ -7632,13 +7741,13 @@ class ActionService {
 
       if (response.statusCode == 200) {
         final responseData = response.data;
-        
+
         // Backend returns different structures based on submit_type:
         // - For "accompanyuser": data: { ...response.data, duplicates_found: ... }
         // - For "subuser": data: { apiResult: { duplicates_found: ... }, ... }
         final data = responseData['data'];
         bool? duplicatesFound;
-        
+
         if (data is Map) {
           // Check for duplicates_found directly (accompanyuser case)
           if (data.containsKey('duplicates_found')) {
@@ -7652,21 +7761,23 @@ class ActionService {
             }
           }
         }
-        
+
         // Normalize the response structure for consistent handling
         final normalizedData = <String, dynamic>{
           if (data is Map) ...data,
           'duplicates_found': duplicatesFound ?? false,
         };
-        
+
         return {
           'success': true,
           'data': normalizedData,
-          'message': responseData['message'] ?? 'Duplicate photo validation completed',
+          'message':
+              responseData['message'] ?? 'Duplicate photo validation completed',
         };
       } else {
         final responseData = response.data;
-        String message = response.statusMessage ?? 'Failed to validate duplicate photos';
+        String message =
+            response.statusMessage ?? 'Failed to validate duplicate photos';
         dynamic errorBody;
         if (responseData is Map) {
           message = (responseData['message'] as String?) ?? message;
@@ -9133,8 +9244,12 @@ class ActionService {
           'Authorization': 'Bearer $authToken',
         },
       );
-      print(':outbox_tray: getAllReferenceForms API response status: ${response.statusCode}');
-      print(':outbox_tray: getAllReferenceForms API response body: ${response.body}');
+      print(
+        ':outbox_tray: getAllReferenceForms API response status: ${response.statusCode}',
+      );
+      print(
+        ':outbox_tray: getAllReferenceForms API response body: ${response.body}',
+      );
       // Parse response
       Map<String, dynamic> responseData;
       try {
@@ -9153,13 +9268,16 @@ class ActionService {
           'success': true,
           'statusCode': 200,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'Kaalgyani forms retrieved successfully',
+          'message':
+              responseData['message'] ??
+              'Kaalgyani forms retrieved successfully',
         };
       } else {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Failed to retrieve Kaalgyani forms',
+          'message':
+              responseData['message'] ?? 'Failed to retrieve Kaalgyani forms',
           'error': responseData['error'],
         };
       }
@@ -9191,21 +9309,13 @@ class ActionService {
       }
       // Validate required parameters
       if (formId.isEmpty) {
-        return {
-          'success': false,
-          'message': 'Form ID is required.',
-        };
+        return {'success': false, 'message': 'Form ID is required.'};
       }
       if (status.isEmpty) {
-        return {
-          'success': false,
-          'message': 'Status is required.',
-        };
+        return {'success': false, 'message': 'Status is required.'};
       }
       // Prepare request body
-      final Map<String, dynamic> requestBody = {
-        'status': status,
-      };
+      final Map<String, dynamic> requestBody = {'status': status};
       // Add optional secretary remark if provided
       if (secretaryRemark != null && secretaryRemark.isNotEmpty) {
         requestBody['secretaryRemark'] = secretaryRemark;
@@ -9226,14 +9336,20 @@ class ActionService {
         },
         body: jsonEncode(requestBody),
       );
-      print(':outbox_tray: updateReferenceFormStatus API response status: ${response.statusCode}');
-      print(':outbox_tray: updateReferenceFormStatus API response body: ${response.body}');
+      print(
+        ':outbox_tray: updateReferenceFormStatus API response status: ${response.statusCode}',
+      );
+      print(
+        ':outbox_tray: updateReferenceFormStatus API response body: ${response.body}',
+      );
       // Parse response
       Map<String, dynamic> responseData;
       try {
         responseData = jsonDecode(response.body);
       } catch (e) {
-        print(':x: Failed to parse updateReferenceFormStatus response as JSON: $e');
+        print(
+          ':x: Failed to parse updateReferenceFormStatus response as JSON: $e',
+        );
         return {
           'success': false,
           'statusCode': response.statusCode,
@@ -9246,7 +9362,9 @@ class ActionService {
           'success': true,
           'statusCode': 200,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'Kaalgyani form status updated successfully',
+          'message':
+              responseData['message'] ??
+              'Kaalgyani form status updated successfully',
         };
       } else if (response.statusCode == 400) {
         return {
@@ -9272,7 +9390,9 @@ class ActionService {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Failed to update Kaalgyani form status',
+          'message':
+              responseData['message'] ??
+              'Failed to update Kaalgyani form status',
           'error': responseData['error'],
         };
       }
@@ -9287,7 +9407,9 @@ class ActionService {
   }
 
   // Delete reference form by ID
-  static Future<Map<String, dynamic>> deleteReferenceFormById(String formId) async {
+  static Future<Map<String, dynamic>> deleteReferenceFormById(
+    String formId,
+  ) async {
     try {
       final token = await StorageService.getToken();
       if (token == null) {
@@ -9309,15 +9431,21 @@ class ActionService {
         },
       );
 
-      print(':outbox_tray: deleteReferenceFormById API response status: ${response.statusCode}');
-      print(':outbox_tray: deleteReferenceFormById API response body: ${response.body}');
+      print(
+        ':outbox_tray: deleteReferenceFormById API response status: ${response.statusCode}',
+      );
+      print(
+        ':outbox_tray: deleteReferenceFormById API response body: ${response.body}',
+      );
 
       // Parse response
       Map<String, dynamic> responseData;
       try {
         responseData = jsonDecode(response.body);
       } catch (e) {
-        print(':x: Failed to parse deleteReferenceFormById response as JSON: $e');
+        print(
+          ':x: Failed to parse deleteReferenceFormById response as JSON: $e',
+        );
         return {
           'success': false,
           'statusCode': 500,
@@ -9330,7 +9458,8 @@ class ActionService {
           'success': true,
           'statusCode': 200,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'Kaalgyani form deleted successfully',
+          'message':
+              responseData['message'] ?? 'Kaalgyani form deleted successfully',
         };
       } else if (response.statusCode == 400) {
         return {
@@ -9349,7 +9478,9 @@ class ActionService {
         return {
           'success': false,
           'statusCode': 403,
-          'message': responseData['message'] ?? 'Access denied. Insufficient permissions.',
+          'message':
+              responseData['message'] ??
+              'Access denied. Insufficient permissions.',
         };
       } else if (response.statusCode == 404) {
         return {
@@ -9361,7 +9492,8 @@ class ActionService {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Failed to delete Kaalgyani form',
+          'message':
+              responseData['message'] ?? 'Failed to delete Kaalgyani form',
         };
       }
     } catch (error) {
@@ -9375,7 +9507,9 @@ class ActionService {
   }
 
   // Create alternative phone
-  static Future<Map<String, dynamic>> createAlternativePhone(String number) async {
+  static Future<Map<String, dynamic>> createAlternativePhone(
+    String number,
+  ) async {
     try {
       final token = await StorageService.getToken();
 
@@ -9393,18 +9527,17 @@ class ActionService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'number': number,
-        }),
+        body: jsonEncode({'number': number}),
       );
 
       // Check if response is HTML (404 or server error)
-      if (response.body.trim().startsWith('<!DOCTYPE html>') || 
+      if (response.body.trim().startsWith('<!DOCTYPE html>') ||
           response.body.trim().startsWith('<html>')) {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': 'API endpoint not found. Please check if the backend endpoint is implemented.',
+          'message':
+              'API endpoint not found. Please check if the backend endpoint is implemented.',
         };
       }
 
@@ -9415,7 +9548,9 @@ class ActionService {
           'success': true,
           'statusCode': 201,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'Alternative phone created successfully',
+          'message':
+              responseData['message'] ??
+              'Alternative phone created successfully',
         };
       } else if (response.statusCode == 400) {
         return {
@@ -9428,7 +9563,8 @@ class ActionService {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Failed to create alternative phone',
+          'message':
+              responseData['message'] ?? 'Failed to create alternative phone',
           'error': responseData['error'],
         };
       }
@@ -9463,12 +9599,13 @@ class ActionService {
       );
 
       // Check if response is HTML (404 or server error)
-      if (response.body.trim().startsWith('<!DOCTYPE html>') || 
+      if (response.body.trim().startsWith('<!DOCTYPE html>') ||
           response.body.trim().startsWith('<html>')) {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': 'API endpoint not found. Please check if the backend endpoint is implemented.',
+          'message':
+              'API endpoint not found. Please check if the backend endpoint is implemented.',
         };
       }
 
@@ -9479,13 +9616,17 @@ class ActionService {
           'success': true,
           'statusCode': 200,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'Alternative phones retrieved successfully',
+          'message':
+              responseData['message'] ??
+              'Alternative phones retrieved successfully',
         };
       } else {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Failed to retrieve alternative phones',
+          'message':
+              responseData['message'] ??
+              'Failed to retrieve alternative phones',
           'error': responseData['error'],
         };
       }
@@ -9499,7 +9640,10 @@ class ActionService {
   }
 
   // Update alternative phone
-  static Future<Map<String, dynamic>> updateAlternativePhone(String id, String number) async {
+  static Future<Map<String, dynamic>> updateAlternativePhone(
+    String id,
+    String number,
+  ) async {
     try {
       final token = await StorageService.getToken();
 
@@ -9517,18 +9661,17 @@ class ActionService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'number': number,
-        }),
+        body: jsonEncode({'number': number}),
       );
 
       // Check if response is HTML (404 or server error)
-      if (response.body.trim().startsWith('<!DOCTYPE html>') || 
+      if (response.body.trim().startsWith('<!DOCTYPE html>') ||
           response.body.trim().startsWith('<html>')) {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': 'API endpoint not found. Please check if the backend endpoint is implemented.',
+          'message':
+              'API endpoint not found. Please check if the backend endpoint is implemented.',
         };
       }
 
@@ -9539,13 +9682,16 @@ class ActionService {
           'success': true,
           'statusCode': 200,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'Alternative phone updated successfully',
+          'message':
+              responseData['message'] ??
+              'Alternative phone updated successfully',
         };
       } else {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Failed to update alternative phone',
+          'message':
+              responseData['message'] ?? 'Failed to update alternative phone',
           'error': responseData['error'],
         };
       }
@@ -9570,7 +9716,9 @@ class ActionService {
           'message': 'No authentication token found. Please login again.',
         };
       }
-      print('DEBUG SIDEBAR: Making API call to $baseUrl/appointment/sidebar-counts');
+      print(
+        'DEBUG SIDEBAR: Making API call to $baseUrl/appointment/sidebar-counts',
+      );
       // Make API call with authorization header
       final response = await http.get(
         Uri.parse('$baseUrl/appointment/sidebar-counts'),
@@ -9589,7 +9737,9 @@ class ActionService {
           'success': true,
           'statusCode': 200,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'Sidebar counts retrieved successfully',
+          'message':
+              responseData['message'] ??
+              'Sidebar counts retrieved successfully',
         };
       } else if (response.statusCode == 401) {
         // Token expired or invalid
@@ -9632,8 +9782,10 @@ class ActionService {
         };
       }
 
-      print('DEBUG DELETE SUB USER: Making API call to $baseUrl/auth/sub-user-delete/$subUserId');
-      
+      print(
+        'DEBUG DELETE SUB USER: Making API call to $baseUrl/auth/sub-user-delete/$subUserId',
+      );
+
       // Make API call with authorization header
       final response = await http.delete(
         Uri.parse('$baseUrl/auth/sub-user-delete/$subUserId'),
@@ -9643,14 +9795,18 @@ class ActionService {
         },
       );
 
-      print('DEBUG DELETE SUB USER: Response status code: ${response.statusCode}');
+      print(
+        'DEBUG DELETE SUB USER: Response status code: ${response.statusCode}',
+      );
       print('DEBUG DELETE SUB USER: Response body: ${response.body}');
 
       // Parse response
       final Map<String, dynamic> responseData = jsonDecode(response.body);
-      
+
       if (response.statusCode == 200) {
-        print('DEBUG DELETE SUB USER: Success response data: ${responseData['data']}');
+        print(
+          'DEBUG DELETE SUB USER: Success response data: ${responseData['data']}',
+        );
         return {
           'success': true,
           'statusCode': 200,
@@ -9661,7 +9817,8 @@ class ActionService {
         return {
           'success': false,
           'statusCode': 400,
-          'message': responseData['message'] ?? 'Cannot delete main user account',
+          'message':
+              responseData['message'] ?? 'Cannot delete main user account',
         };
       } else if (response.statusCode == 401) {
         // Token expired or invalid
@@ -9680,7 +9837,9 @@ class ActionService {
         };
       } else {
         // Other error
-        print('DEBUG DELETE SUB USER: Error response: ${responseData['message']}');
+        print(
+          'DEBUG DELETE SUB USER: Error response: ${responseData['message']}',
+        );
         return {
           'success': false,
           'statusCode': response.statusCode,
@@ -9695,19 +9854,19 @@ class ActionService {
         'statusCode': 500,
         'message': 'Network error. Please check your connection and try again.',
       };
-      }
     }
+  }
 
   /// Create Desk User API Function
   /// Creates a new desk user with the provided information
-  /// 
+  ///
   /// Parameters:
   /// - formData: Map containing user information (fullName, email, password, etc.)
   /// - profileImage: Optional File object for profile photo
-  /// 
+  ///
   /// Returns:
   /// - Map with success status, message, and user data
-  /// 
+  ///
   /// Usage:
   /// ```dart
   /// final result = await ActionService.createDeskUser(formData, profileImage);
@@ -9784,7 +9943,8 @@ class ActionService {
         return {
           'success': true,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Desk user created successfully',
+          'message':
+              responseData['message'] ?? 'Desk user created successfully',
           'data': responseData['data'],
         };
       } else {
@@ -9808,7 +9968,7 @@ class ActionService {
   }
 
   /// Send OTP email to AOL teacher for verification
-  /// 
+  ///
   /// Parameters:
   /// - email: Teacher's email address
   /// - fullName: Teacher's full name (optional)
@@ -9864,7 +10024,9 @@ class ActionService {
           'success': true,
           'statusCode': 200,
           'data': responseData['data'],
-          'message': responseData['message'] ?? 'OTP sent successfully to AOL teacher email',
+          'message':
+              responseData['message'] ??
+              'OTP sent successfully to AOL teacher email',
         };
       } else {
         // ✅ 7. Failed to send OTP
@@ -9886,7 +10048,7 @@ class ActionService {
   }
 
   /// Verify AOL teacher OTP
-  /// 
+  ///
   /// Parameters:
   /// - email: Teacher's email address
   /// - code: OTP code to verify
@@ -10031,7 +10193,8 @@ class ActionService {
         return {
           'success': false,
           'statusCode': 400,
-          'message': 'Missing required fields: fullName, email, or phoneNumber.',
+          'message':
+              'Missing required fields: fullName, email, or phoneNumber.',
         };
       }
 
@@ -10058,7 +10221,7 @@ class ActionService {
       final fileName = profilePhotoFile.path.split('/').last;
       final fileExtension = fileName.split('.').last.toLowerCase();
       final allowedExtensions = ['jpg', 'jpeg', 'png', 'webp'];
-      
+
       if (!allowedExtensions.contains(fileExtension)) {
         return {
           'success': false,
@@ -10068,7 +10231,8 @@ class ActionService {
       }
 
       final fileSize = await profilePhotoFile.length();
-      if (fileSize > 5 * 1024 * 1024) { // 5MB limit
+      if (fileSize > 5 * 1024 * 1024) {
+        // 5MB limit
         return {
           'success': false,
           'statusCode': 400,
@@ -10087,8 +10251,9 @@ class ActionService {
 
       // Get user ID from stored user data
       final userData = await StorageService.getUserData();
-      final userId = userData?['userId'] ?? userData?['_id'] ?? userData?['id'] ?? '';
-      
+      final userId =
+          userData?['userId'] ?? userData?['_id'] ?? userData?['id'] ?? '';
+
       if (userId.isEmpty) {
         return {
           'success': false,
@@ -10103,40 +10268,42 @@ class ActionService {
       request.fields['email'] = email.toLowerCase().trim();
       request.fields['password'] = password;
       request.fields['phoneNumber'] = phoneNumber;
-      
+
       if (designation != null && designation.isNotEmpty) {
         request.fields['designation'] = designation.trim();
       }
-      
+
       if (company != null && company.isNotEmpty) {
         request.fields['company'] = company.trim();
       }
-      
+
       request.fields['full_address'] = full_address.trim();
       request.fields['userTags'] = jsonEncode(userTags);
       request.fields['aol_teacher'] = aol_teacher.toString();
       request.fields['isInternational'] = isInternational.toString();
-      
+
       if (teacher_type != null && teacher_type.isNotEmpty) {
         request.fields['teacher_type'] = teacher_type;
       }
-      
+
       if (teachercode != null && teachercode.isNotEmpty) {
         request.fields['teachercode'] = teachercode.trim().toUpperCase();
       }
-      
+
       if (teacheremail != null && teacheremail.isNotEmpty) {
         request.fields['teacheremail'] = teacheremail.toLowerCase().trim();
       }
-      
+
       if (mobilenumber != null && mobilenumber.isNotEmpty) {
         request.fields['mobilenumber'] = mobilenumber;
       }
-      
+
       if (programTypesCanTeach != null && programTypesCanTeach.isNotEmpty) {
-        request.fields['programTypesCanTeach'] = jsonEncode(programTypesCanTeach);
+        request.fields['programTypesCanTeach'] = jsonEncode(
+          programTypesCanTeach,
+        );
       }
-      
+
       if (teacherEmploymentType != null && teacherEmploymentType.isNotEmpty) {
         request.fields['teacherEmploymentType'] = teacherEmploymentType;
       }
@@ -10144,7 +10311,7 @@ class ActionService {
       // Add profile photo file (same as registerUser)
       final fileStream = http.ByteStream(profilePhotoFile.openRead());
       final fileLength = await profilePhotoFile.length();
-      
+
       final multipartFile = http.MultipartFile(
         'file', // Field name expected by server
         fileStream,
@@ -10153,8 +10320,10 @@ class ActionService {
         contentType: MediaType('image', fileExtension),
       );
       request.files.add(multipartFile);
-      
-      print('📸 Uploading profile photo: $fileName (${fileLength} bytes, image/$fileExtension)');
+
+      print(
+        '📸 Uploading profile photo: $fileName (${fileLength} bytes, image/$fileExtension)',
+      );
 
       // Send request
       final streamedResponse = await request.send();
@@ -10176,7 +10345,9 @@ class ActionService {
         return {
           'success': false,
           'statusCode': 400,
-          'message': responseData['message'] ?? 'Validation failed. Please check your input.',
+          'message':
+              responseData['message'] ??
+              'Validation failed. Please check your input.',
         };
       } else if (response.statusCode == 401) {
         // Token expired or invalid
@@ -10198,14 +10369,18 @@ class ActionService {
         return {
           'success': false,
           'statusCode': 409,
-          'message': responseData['message'] ?? 'Email or phone number already exists.',
+          'message':
+              responseData['message'] ??
+              'Email or phone number already exists.',
         };
       } else {
         // Other errors
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Profile update failed. Please try again.',
+          'message':
+              responseData['message'] ??
+              'Profile update failed. Please try again.',
         };
       }
     } catch (error) {
@@ -10214,7 +10389,8 @@ class ActionService {
         return {
           'success': false,
           'statusCode': 500,
-          'message': 'Network error. Please check your connection and try again.',
+          'message':
+              'Network error. Please check your connection and try again.',
         };
       }
       return {
@@ -10242,9 +10418,7 @@ class ActionService {
       }
 
       final url = Uri.parse('$baseUrl/albums/request-album');
-      final requestBody = {
-        'access_code': accessCode,
-      };
+      final requestBody = {'access_code': accessCode};
 
       print('🔐 Making API call to request access to private album: $url');
       print('📤 Request body: ${jsonEncode(requestBody)}');
@@ -10286,7 +10460,9 @@ class ActionService {
         return {
           'success': false,
           'statusCode': 404,
-          'message': responseData['message'] ?? 'Invalid access code. Please try again.',
+          'message':
+              responseData['message'] ??
+              'Invalid access code. Please try again.',
           'error': responseData['error'],
         };
       } else if (response.statusCode == 400) {
@@ -10346,9 +10522,9 @@ class ActionService {
         queryParams['search'] = search.trim();
       }
 
-      final uri = Uri.parse('$baseUrl/albums/get-all-private-albums').replace(
-        queryParameters: queryParams,
-      );
+      final uri = Uri.parse(
+        '$baseUrl/albums/get-all-private-albums',
+      ).replace(queryParameters: queryParams);
 
       print('📸 Making API call to get private albums: $uri');
       print('📸 Query params: page=$page, limit=$limit, search=$search');
@@ -10393,13 +10569,16 @@ class ActionService {
           'totalAlbums': totalAlbums,
           'totalPages': totalPages,
           'currentPage': currentPage,
-          'message': responseData['message'] ?? 'Private albums retrieved successfully.',
+          'message':
+              responseData['message'] ??
+              'Private albums retrieved successfully.',
         };
       } else {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Failed to retrieve private albums',
+          'message':
+              responseData['message'] ?? 'Failed to retrieve private albums',
           'error': responseData['error'],
         };
       }
@@ -10441,9 +10620,9 @@ class ActionService {
         'limit': limit.toString(),
       };
 
-      final uri = Uri.parse('$baseUrl/albums/$albumId').replace(
-        queryParameters: queryParams,
-      );
+      final uri = Uri.parse(
+        '$baseUrl/albums/$albumId',
+      ).replace(queryParameters: queryParams);
 
       print('📸 Making API call to get album details: $uri');
       print('📸 Query params: albumId=$albumId, page=$page, limit=$limit');
@@ -10475,18 +10654,21 @@ class ActionService {
 
       if (response.statusCode == 200) {
         final data = responseData['data'] as Map<String, dynamic>? ?? {};
-        
+
         return {
           'success': true,
           'statusCode': 200,
           'data': data,
-          'message': responseData['message'] ?? 'Album details retrieved successfully.',
+          'message':
+              responseData['message'] ??
+              'Album details retrieved successfully.',
         };
       } else {
         return {
           'success': false,
           'statusCode': response.statusCode,
-          'message': responseData['message'] ?? 'Failed to retrieve album details',
+          'message':
+              responseData['message'] ?? 'Failed to retrieve album details',
           'error': responseData['error'],
         };
       }
@@ -10530,7 +10712,8 @@ class ActionService {
         return {
           'success': false,
           'statusCode': 400,
-          'message': '${type == 'deletion' ? 'Deletion' : 'Cancellation'} reason is required',
+          'message':
+              '${type == 'deletion' ? 'Deletion' : 'Cancellation'} reason is required',
         };
       }
 
@@ -10570,7 +10753,9 @@ class ActionService {
           try {
             responseData = jsonDecode(response.body);
           } catch (e) {
-            errors.add('Failed to parse response for appointment $appointmentId');
+            errors.add(
+              'Failed to parse response for appointment $appointmentId',
+            );
             continue;
           }
 
@@ -10603,19 +10788,14 @@ class ActionService {
           'success': true,
           'statusCode': 200,
           'message': 'Some appointments were cancelled successfully',
-          'data': {
-            'successful': results,
-            'failed': errors,
-          },
+          'data': {'successful': results, 'failed': errors},
         };
       } else {
         return {
           'success': true,
           'statusCode': 200,
           'message': 'All appointments cancelled successfully',
-          'data': {
-            'successful': results,
-          },
+          'data': {'successful': results},
         };
       }
     } catch (error) {
