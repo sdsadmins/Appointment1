@@ -14,8 +14,7 @@ class ActionService {
   // Global base URL variable
   static String? _baseUrl;
 
-  static const String _fallbackBaseUrl =
-      'https://appt-test.sumerudigital.com/api/v3';
+  static const String _fallbackBaseUrl = 'https://artofliving.io/api/v3';
 
   /// App version for middleware. Set from main() via PackageInfo.fromPlatform(); no default.
   static String appVersion = '';
@@ -66,8 +65,7 @@ class ActionService {
   // 1) Load base URL first (no version headers) so both iOS and Android get the URL.
   // 2) Then run version check (with version headers); if 426, set pending so main shows update card.
   static Future<void> initializeBaseUrl() async {
-    const baseUrlEndpoint =
-        'https://appt-test.sumerudigital.com/api/v3/baseurl';
+    const baseUrlEndpoint = 'https://artofliving.io/api/v3/baseurl';
 
     // —— Step 1: Fetch base URL (no version headers) ——
     try {
@@ -145,11 +143,11 @@ class ActionService {
   static Future<String> get _oldBaseUrl async {
     try {
       print(
-        '🌐 [DEBUG] Fetching base URL from: https://appt-test.sumerudigital.com/api/v3/baseurl',
+        '🌐 [DEBUG] Fetching base URL from: https://artofliving.io/api/v3/baseurl',
       );
 
       final response = await http.get(
-        Uri.parse('https://appt-test.sumerudigital.com/api/v3/baseurl'),
+        Uri.parse('https://artofliving.io/api/v3/baseurl'),
         headers: {'Content-Type': 'application/json'},
       );
 
@@ -161,7 +159,7 @@ class ActionService {
           '❌ [ERROR] Base URL API failed with status: ${response.statusCode}',
         );
         // Fallback to hardcoded URL if API fails
-        return 'https://appt-test.sumerudigital.com/api/v3';
+        return 'https://artofliving.io/api/v3';
       }
 
       final data = jsonDecode(response.body);
@@ -174,7 +172,7 @@ class ActionService {
     } catch (error) {
       print('❌ [ERROR] Failed to fetch base URL: $error');
       // Fallback to hardcoded URL if there's an error
-      return 'https://appt-test.sumerudigital.com/api/v3';
+      return 'https://artofliving.io/api/v3';
     }
   }
 

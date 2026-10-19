@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Internet permission for API calls -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -16,8 +17,11 @@
     <uses-feature android:name="android.hardware.camera.autofocus" />
     
     <!-- Storage permissions for downloading images -->
-    <!-- For Android 13+ (API level 33+) - scoped storage approach -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Android 13+ (API 33+): no media permission needed - image_picker/file_picker use the
+         system photo picker. Google Play policy forbids READ_MEDIA_IMAGES/VIDEO here, so strip
+         them even if a plugin tries to add them. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
     <!-- For Android 10-12 (API level 29-32) - scoped storage -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
         android:maxSdkVersion="32" />
